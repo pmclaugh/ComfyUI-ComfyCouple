@@ -36,6 +36,18 @@ def set_model_patch_replace(model, patch, key):
         to["patches_replace"]["attn2"] = {}
     to["patches_replace"]["attn2"][key] = patch
 
+def _match_len(cond: torch.Tensor, target_len: int) -> torch.Tensor:
+    # cond: [B, S, C]
+    cur = cond.shape[1]
+    if cur == target_len:
+        return cond
+    if cur > target_len:
+        return cond[:, :target_len, :]
+    # pad by repeating then slicing (keeps semantics better than zero-pad)
+    reps = (target_len + cur - 1) // cur
+    expanded = cond.repeat(1, reps, 1)
+    return expanded[:, :target_len, :]
+
 class AttentionCouple:
 
     @classmethod
@@ -117,7 +129,9 @@ class AttentionCouple:
             masks_cond = get_masks_from_q(self.negative_positive_masks[1], q_list[0], extra_options["original_shape"])
 
             context_uncond = torch.cat([cond for cond in self.negative_positive_conds[0]], dim=0)
-            context_cond = torch.cat([cond for cond in self.negative_positive_conds[1]], dim=0)
+            pos_conds = list(self.negative_positive_conds[1])  # tensors shaped [B, S, C], but S may differ
+            max_len = max(t.shape[1] for t in pos_conds)
+            context_cond = torch.cat([_match_len(t, max_len) for t in pos_conds], dim=0)
             
             k_uncond = module.to_k(context_uncond)
             k_cond = module.to_k(context_cond)
